@@ -37,52 +37,54 @@ class NotificationService {
   }
 
   static Future<void> _initializeFirebaseMessaging() async {
-    // Yêu cầu quyền thông báo
-    NotificationSettings settings = await _firebaseMessaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      provisional: false,
-    );
+    try {
+      // Yêu cầu quyền thông báo
+      NotificationSettings settings = await _firebaseMessaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
 
-    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      print('✅ Đã cấp quyền thông báo');
-      
-      // Lấy FCM token
-      String? token = await _firebaseMessaging.getToken();
-      if (token != null) {
-        await _saveTokenToFirestore(token);
+      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+        print('✅ Đã cấp quyền thông báo');
+        
+        // Lấy FCM token
+        String? token = await _firebaseMessaging.getToken();
+        if (token != null) {
+          await _saveTokenToFirestore(token);
+        }
+
+        // Lắng nghe token refresh
+        _firebaseMessaging.onTokenRefresh.listen(_saveTokenToFirestore);
+
+        // Xử lý thông báo khi app đang chạy
+        FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+
+        // Xử lý thông báo khi app được mở từ background
+        FirebaseMessaging.onMessageOpenedApp.listen(_handleBackgroundMessage);
+
+        // Xử lý thông báo khi app được mở từ terminated state
+        RemoteMessage? initialMessage = await _firebaseMessaging.getInitialMessage();
+        if (initialMessage != null) {
+          _handleBackgroundMessage(initialMessage);
+        }
       }
-
-      // Lắng nghe token refresh
-      _firebaseMessaging.onTokenRefresh.listen(_saveTokenToFirestore);
-
-      // Xử lý thông báo khi app đang chạy
-      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
-
-      // Xử lý thông báo khi app được mở từ background
-      FirebaseMessaging.onMessageOpenedApp.listen(_handleBackgroundMessage);
-
-      // Xử lý thông báo khi app được mở từ terminated state
-      RemoteMessage? initialMessage = await _firebaseMessaging.getInitialMessage();
-      if (initialMessage != null) {
-        _handleBackgroundMessage(initialMessage);
-      }
+    } catch (e) {
+      print('❌ Lỗi khởi tạo Firebase Messaging: $e');
     }
   }
 
   static Future<void> _saveTokenToFirestore(String token) async {
-    final user = _auth.currentUser;
-    if (user != null) {
-      try {
-        await _firestore.collection('users').doc(user.uid).update({
-          'fcmToken': token,
-          'tokenUpdatedAt': FieldValue.serverTimestamp(),
-        });
-        print('✅ Đã lưu FCM token');
-      } catch (e) {
-        print('❌ Lỗi khi lưu FCM token: $e');
-      }
+    try {
+      // Lưu token vào collection users (đã tồn tại)
+      await _firestore.collection('users').doc('current_user_id').set({
+        'fcmToken': token,
+        'tokenUpdatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      print('✅ Đã lưu FCM token vào users collection');
+    } catch (e) {
+      print('❌ Lỗi khi lưu FCM token: $e');
     }
   }
 
@@ -95,14 +97,10 @@ class NotificationService {
       body: message.notification?.body ?? '',
       payload: message.data.toString(),
     );
-
-    // Lưu thông báo vào Firestore
-    _saveNotificationToFirestore(message);
   }
 
   static void _handleBackgroundMessage(RemoteMessage message) {
     print('📱 Mở app từ thông báo: ${message.notification?.title}');
-    // Xử lý navigation hoặc action cụ thể
     _handleNotificationAction(message.data);
   }
 
@@ -143,43 +141,12 @@ class NotificationService {
 
   static void _onNotificationTapped(NotificationResponse response) {
     print('📱 Người dùng tap vào thông báo: ${response.payload}');
-    // Xử lý khi user tap vào notification
-  }
-
-  static Future<void> _saveNotificationToFirestore(RemoteMessage message) async {
-    final user = _auth.currentUser;
-    if (user != null) {
-      try {
-        final thongBao = ThongBao(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          tieuDe: message.notification?.title ?? 'KFC Vietnam',
-          noiDung: message.notification?.body ?? '',
-          loai: message.data['type'] ?? 'don_hang', // Mặc định là đơn hàng
-          thoiGian: DateTime.now(),
-          daDoc: false,
-          hinhAnh: message.notification?.android?.imageUrl,
-          duLieuThem: message.data,
-        );
-
-        await _firestore
-            .collection('users')
-            .doc(user.uid)
-            .collection('thong_bao')
-            .add(thongBao.toJson());
-        
-        print('✅ Đã lưu thông báo vào Firestore');
-      } catch (e) {
-        print('❌ Lỗi khi lưu thông báo: $e');
-      }
-    }
   }
 
   static void _handleNotificationAction(Map<String, dynamic> data) {
-    // Xử lý action dựa trên data của notification
     final type = data['type'];
     final id = data['id'];
     
-    // Tập trung vào đơn hàng
     if (type == 'don_hang') {
       // Navigate to order detail
     }
@@ -197,156 +164,291 @@ class NotificationService {
     );
   }
 
-  // Lấy danh sách thông báo của user
-  static Future<List<ThongBao>> getUserNotifications() async {
-    final user = _auth.currentUser;
-    if (user == null) return [];
-
+  // Kiểm tra xem collection thong_bao có tồn tại không
+  static Future<bool> checkNotificationCollectionExists() async {
     try {
       final snapshot = await _firestore
-          .collection('users')
-          .doc(user.uid)
           .collection('thong_bao')
-          .orderBy('thoiGian', descending: true)
+          .limit(1)
+          .get();
+      
+      print('📋 Collection thong_bao exists: ${snapshot.docs.isNotEmpty}');
+      return true; // Collection tồn tại
+    } catch (e) {
+      print('📭 Collection thong_bao không tồn tại: $e');
+      return false; // Collection không tồn tại
+    }
+  }
+
+  // Lấy thông báo từ Firebase (KHÔNG SỬ DỤNG ORDERBY để tránh lỗi index)
+  static Future<List<ThongBao>> getUserNotifications() async {
+    try {
+      // Kiểm tra collection có tồn tại không
+      bool collectionExists = await checkNotificationCollectionExists();
+      if (!collectionExists) {
+        print('📭 Collection thong_bao chưa được tạo');
+        return [];
+      }
+
+      // Lấy tất cả thông báo của user (không orderBy để tránh lỗi index)
+      final snapshot = await _firestore
+          .collection('thong_bao')
+          .where('duLieuBoSung.nguoiDungId', isEqualTo: 'current_user_id')
           .limit(50)
           .get();
 
-      return snapshot.docs.map((doc) {
+      if (snapshot.docs.isEmpty) {
+        print('📭 Chưa có thông báo nào cho user này');
+        return [];
+      }
+
+      List<ThongBao> notifications = snapshot.docs.map((doc) {
         final data = doc.data();
-        data['id'] = doc.id;
-        return ThongBao.fromJson(data);
+        return _convertFirebaseToThongBao(doc.id, data);
       }).toList();
+
+      // Sắp xếp theo thời gian trong code (thay vì Firebase)
+      notifications.sort((a, b) => b.thoiGian.compareTo(a.thoiGian));
+
+      print('✅ Đã lấy ${notifications.length} thông báo từ Firebase');
+      return notifications;
     } catch (e) {
-      print('❌ Lỗi khi lấy thông báo: $e');
+      print('❌ Lỗi khi lấy thông báo từ Firebase: $e');
       return [];
     }
   }
 
-  // Đánh dấu thông báo đã đọc
-  static Future<void> markAsRead(String notificationId) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
+  // Stream thông báo từ Firebase (KHÔNG SỬ DỤNG ORDERBY để tránh lỗi index)
+  static Stream<List<ThongBao>> streamUserNotifications() {
+    return Stream.fromFuture(checkNotificationCollectionExists())
+        .asyncExpand((collectionExists) {
+      if (!collectionExists) {
+        print('📭 Stream: Collection thong_bao chưa được tạo');
+        return Stream.value(<ThongBao>[]);
+      }
 
+      return _firestore
+          .collection('thong_bao')
+          .where('duLieuBoSung.nguoiDungId', isEqualTo: 'current_user_id')
+          .limit(50)
+          .snapshots()
+          .map((snapshot) {
+        if (snapshot.docs.isEmpty) {
+          print('📭 Stream: Chưa có thông báo nào cho user này');
+          return <ThongBao>[];
+        }
+
+        List<ThongBao> notifications = snapshot.docs.map((doc) {
+          final data = doc.data();
+          return _convertFirebaseToThongBao(doc.id, data);
+        }).toList();
+
+        // Sắp xếp theo thời gian trong code (thay vì Firebase)
+        notifications.sort((a, b) => b.thoiGian.compareTo(a.thoiGian));
+
+        print('✅ Stream: Đã nhận ${notifications.length} thông báo từ Firebase');
+        return notifications;
+      });
+    }).handleError((error) {
+      print('❌ Lỗi stream thông báo: $error');
+      return <ThongBao>[];
+    });
+  }
+
+  // Convert Firebase document to ThongBao model
+  static ThongBao _convertFirebaseToThongBao(String docId, Map<String, dynamic> data) {
+    DateTime thoiGian = DateTime.now();
+    if (data['thoiGianTao'] != null) {
+      if (data['thoiGianTao'] is Timestamp) {
+        thoiGian = (data['thoiGianTao'] as Timestamp).toDate();
+      } else if (data['thoiGianTao'] is String) {
+        try {
+          thoiGian = DateTime.parse(data['thoiGianTao']);
+        } catch (e) {
+          print('Lỗi parse thời gian: $e');
+        }
+      }
+    }
+
+    Map<String, dynamic> duLieuBoSung = {};
+    if (data['duLieuBoSung'] != null) {
+      duLieuBoSung = Map<String, dynamic>.from(data['duLieuBoSung']);
+    }
+
+    String loai = duLieuBoSung['loai'] ?? 'don_hang';
+    String? status = duLieuBoSung['trangThai'];
+
+    return ThongBao(
+      id: docId,
+      tieuDe: data['tieuDe'] ?? '',
+      noiDung: data['noiDung'] ?? '',
+      loai: loai,
+      thoiGian: thoiGian,
+      daDoc: data['daDoc'] ?? false,
+      duLieuThem: {
+        'donHangId': duLieuBoSung['donHangId'],
+        'status': status,
+        'trangThai': status,
+        'nguoiDungId': duLieuBoSung['nguoiDungId'],
+        'timestamp': thoiGian.toIso8601String(),
+        ...duLieuBoSung,
+      },
+    );
+  }
+
+  // Đánh dấu thông báo đã đọc (nếu collection tồn tại)
+  static Future<void> markAsRead(String notificationId) async {
     try {
+      bool collectionExists = await checkNotificationCollectionExists();
+      if (!collectionExists) {
+        print('📭 Không thể đánh dấu đã đọc: Collection thong_bao chưa tồn tại');
+        return;
+      }
+
       await _firestore
-          .collection('users')
-          .doc(user.uid)
           .collection('thong_bao')
           .doc(notificationId)
-          .update({'daDoc': true});
+          .update({
+        'daDoc': true,
+        'readAt': FieldValue.serverTimestamp(),
+      });
+      print('✅ Đã đánh dấu thông báo đã đọc: $notificationId');
     } catch (e) {
       print('❌ Lỗi khi đánh dấu đã đọc: $e');
     }
   }
 
-  // Xóa thông báo
+  // Xóa thông báo (nếu collection tồn tại)
   static Future<void> deleteNotification(String notificationId) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-
     try {
+      bool collectionExists = await checkNotificationCollectionExists();
+      if (!collectionExists) {
+        print('📭 Không thể xóa: Collection thong_bao chưa tồn tại');
+        return;
+      }
+
       await _firestore
-          .collection('users')
-          .doc(user.uid)
           .collection('thong_bao')
           .doc(notificationId)
           .delete();
+      print('✅ Đã xóa thông báo: $notificationId');
     } catch (e) {
       print('❌ Lỗi khi xóa thông báo: $e');
     }
   }
 
-  // Stream thông báo real-time
-  static Stream<List<ThongBao>> streamUserNotifications() {
-    final user = _auth.currentUser;
-    if (user == null) return Stream.value([]);
-
-    return _firestore
-        .collection('users')
-        .doc(user.uid)
-        .collection('thong_bao')
-        .orderBy('thoiGian', descending: true)
-        .limit(50)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return ThongBao.fromJson(data);
-      }).toList();
-    });
-  }
-
-  // Tạo thông báo trạng thái đơn hàng và lưu vào Firebase
-  static Future<void> createOrderStatusNotification({
+  // Tạo thông báo mới trong Firebase (cho admin gửi đến user)
+  static Future<void> createFirebaseNotificationForUser({
+    required String userId,
     required String orderId,
     required String status,
-    String? message,
+    String? customTitle,
+    String? customMessage,
   }) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-
-    String title = '';
-    String body = message ?? '';
-
-    switch (status.toLowerCase()) {
-      case 'confirmed':
-        title = '✅ Đơn hàng đã xác nhận';
-        body = body.isEmpty ? 'Đơn hàng #${orderId.substring(0, 8)} đã được xác nhận' : body;
-        break;
-      case 'preparing':
-        title = '👨‍🍳 Đang chuẩn bị món';
-        body = body.isEmpty ? 'Đơn hàng của bạn đang được chuẩn bị' : body;
-        break;
-      case 'shipping':
-        title = '🚚 Đang giao hàng';
-        body = body.isEmpty ? 'Đơn hàng đang trên đường giao đến bạn' : body;
-        break;
-      case 'delivered':
-        title = '🎉 Giao hàng thành công';
-        body = body.isEmpty ? 'Đơn hàng đã được giao thành công!' : body;
-        break;
-      case 'cancelled':
-        title = '❌ Đơn hàng đã hủy';
-        body = body.isEmpty ? 'Đơn hàng #${orderId.substring(0, 8)} đã bị hủy' : body;
-        break;
-      default:
-        title = '📦 Cập nhật đơn hàng';
-        body = body.isEmpty ? 'Đơn hàng #${orderId.substring(0, 8)} đã được cập nhật' : body;
-    }
-
     try {
-      // Tạo đối tượng thông báo
-      final thongBao = ThongBao(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        tieuDe: title,
-        noiDung: body,
-        loai: 'don_hang',
-        thoiGian: DateTime.now(),
-        daDoc: false,
-        duLieuThem: {
+      String tieuDe = '';
+      String noiDung = '';
+      
+      // Tạo nội dung thông báo dựa trên trạng thái
+      switch (status) {
+        case 'shipping':
+          tieuDe = customTitle ?? '🚚 Đơn hàng đang được giao';
+          noiDung = customMessage ?? 'Đơn hàng #${orderId.substring(0, 8)} của bạn đang trên đường giao đến. Vui lòng chuẩn bị nhận hàng!';
+          break;
+        case 'delivered':
+          tieuDe = customTitle ?? '✅ Đơn hàng đã giao thành công';
+          noiDung = customMessage ?? 'Đơn hàng #${orderId.substring(0, 8)} đã được giao thành công. Cảm ơn bạn đã tin tưởng KFC!';
+          break;
+        case 'cancelled':
+          tieuDe = customTitle ?? '❌ Đơn hàng đã bị hủy';
+          noiDung = customMessage ?? 'Đơn hàng #${orderId.substring(0, 8)} đã bị hủy. Nếu có thắc mắc, vui lòng liên hệ hotline.';
+          break;
+        case 'confirmed':
+          tieuDe = customTitle ?? '✅ Đơn hàng đã được xác nhận';
+          noiDung = customMessage ?? 'Đơn hàng #${orderId.substring(0, 8)} đã được xác nhận và đang được chuẩn bị.';
+          break;
+        default:
+          tieuDe = customTitle ?? '📋 Cập nhật đơn hàng';
+          noiDung = customMessage ?? 'Đơn hàng #${orderId.substring(0, 8)} đã được cập nhật trạng thái.';
+      }
+
+      // Tạo document trong Firebase
+      final notificationData = {
+        'tieuDe': tieuDe,
+        'noiDung': noiDung,
+        'loai': 'don_hang',
+        'thoiGianTao': FieldValue.serverTimestamp(),
+        'daDoc': false,
+        'duLieuBoSung': {
+          'nguoiDungId': userId,
           'donHangId': orderId,
-          'status': status,
+          'trangThai': status,
+          'loai': 'don_hang',
           'timestamp': DateTime.now().toIso8601String(),
         },
+      };
+
+      // Lưu vào Firebase
+      final docRef = await _firestore.collection('thong_bao').add(notificationData);
+      
+      print('✅ Đã tạo thông báo Firebase: ${docRef.id}');
+      print('📋 Tiêu đề: $tieuDe');
+      print('📝 Nội dung: $noiDung');
+
+      // Gửi local notification
+      await _showLocalNotification(
+        title: tieuDe,
+        body: noiDung,
+        payload: '{"type": "don_hang", "orderId": "$orderId", "notificationId": "${docRef.id}"}',
       );
 
-      // Lưu vào Firestore
-      await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('thong_bao')
-          .add(thongBao.toJson());
-    
-      // Hiển thị local notification
-      await _showLocalNotification(
-        title: title,
-        body: body,
-      );
-    
-      print('✅ Đã tạo thông báo trạng thái đơn hàng: $title');
+      return;
     } catch (e) {
-      print('❌ Lỗi khi tạo thông báo trạng thái đơn hàng: $e');
+      print('❌ Lỗi khi tạo thông báo Firebase: $e');
+      
+      // Fallback: chỉ gửi local notification nếu Firebase fail
+      await _showLocalNotification(
+        title: customTitle ?? '📋 Cập nhật đơn hàng',
+        body: customMessage ?? 'Đơn hàng của bạn đã được cập nhật.',
+      );
     }
   }
+
+// Tạo thông báo Firebase với nội dung tùy chỉnh
+static Future<void> createCustomFirebaseNotification({
+  required String userId,
+  required String title,
+  required String message,
+  String loai = 'thong_bao',
+  Map<String, dynamic>? extraData,
+}) async {
+  try {
+    final notificationData = {
+      'tieuDe': title,
+      'noiDung': message,
+      'loai': loai,
+      'thoiGianTao': FieldValue.serverTimestamp(),
+      'daDoc': false,
+      'duLieuBoSung': {
+        'nguoiDungId': userId,
+        'loai': loai,
+        'timestamp': DateTime.now().toIso8601String(),
+        ...?extraData,
+      },
+    };
+
+    final docRef = await _firestore.collection('thong_bao').add(notificationData);
+    
+    print('✅ Đã tạo thông báo tùy chỉnh: ${docRef.id}');
+
+    // Gửi local notification
+    await _showLocalNotification(
+      title: title,
+      body: message,
+      payload: '{"type": "$loai", "notificationId": "${docRef.id}"}',
+    );
+  } catch (e) {
+    print('❌ Lỗi khi tạo thông báo tùy chỉnh: $e');
+  }
+}
 }

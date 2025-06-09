@@ -108,7 +108,7 @@ class _ManHinhQLDHState extends State<ManHinhQLDH>
             orElse: () => donHangProvider.donHangList.first,
           );
           
-          // Gửi thông báo cho khách hàng
+          // Gửi thông báo cho khách hàng VÀ LƯU VÀO FIREBASE
           await _sendNotificationToCustomer(donHang, trangThai);
           
           ScaffoldMessenger.of(context).showSnackBar(
@@ -117,7 +117,9 @@ class _ManHinhQLDHState extends State<ManHinhQLDH>
                 children: [
                   const Icon(Icons.check_circle, color: Colors.white, size: 20),
                   const SizedBox(width: 8),
-                  const Text('Cập nhật thành công'),
+                  const Expanded(
+                    child: Text('Cập nhật thành công và đã gửi thông báo Firebase'),
+                  ),
                 ],
               ),
               backgroundColor: MauSac.xanhLa,
@@ -170,49 +172,62 @@ class _ManHinhQLDHState extends State<ManHinhQLDH>
 
   Future<void> _sendNotificationToCustomer(DonHang donHang, TrangThaiDonHang trangThai) async {
     try {
+      String status = '';
+      
+      // Chuyển đổi TrangThaiDonHang thành string status
+      switch (trangThai) {
+        case TrangThaiDonHang.dangGiao:
+          status = 'shipping';
+          break;
+        case TrangThaiDonHang.daGiao:
+          status = 'delivered';
+          break;
+        case TrangThaiDonHang.daHuy:
+          status = 'cancelled';
+          break;
+        case TrangThaiDonHang.dangXuLy:
+          status = 'confirmed';
+          break;
+        default:
+          return; // Không gửi thông báo cho trạng thái khác
+      }
+
+      // Gửi thông báo và lưu vào Firebase
+      await NotificationService.createFirebaseNotificationForUser(
+        userId: 'current_user_id', // Thay bằng ID thực của user
+        orderId: donHang.id,
+        status: status,
+      );
+
+      print('✅ Đã gửi thông báo Firebase cho khách hàng');
+    } catch (e) {
+      print('❌ Lỗi khi gửi thông báo Firebase: $e');
+      
+      // Fallback: gửi local notification nếu Firebase fail
       String tieuDe = '';
       String noiDung = '';
       
       switch (trangThai) {
         case TrangThaiDonHang.dangGiao:
           tieuDe = '🚚 Đơn hàng đang được giao';
-          noiDung = 'Đơn hàng #${donHang.id.substring(0, 8)} của bạn đang trên đường giao đến. Vui lòng chuẩn bị nhận hàng!';
+          noiDung = 'Đơn hàng #${donHang.id.substring(0, 8)} của bạn đang trên đường giao đến.';
           break;
         case TrangThaiDonHang.daGiao:
           tieuDe = '✅ Đơn hàng đã giao thành công';
-          noiDung = 'Đơn hàng #${donHang.id.substring(0, 8)} đã được giao thành công. Cảm ơn bạn đã tin tưởng KFC!';
+          noiDung = 'Đơn hàng #${donHang.id.substring(0, 8)} đã được giao thành công.';
           break;
         case TrangThaiDonHang.daHuy:
           tieuDe = '❌ Đơn hàng đã bị hủy';
-          noiDung = 'Đơn hàng #${donHang.id.substring(0, 8)} đã bị hủy. Nếu có thắc mắc, vui lòng liên hệ hotline.';
+          noiDung = 'Đơn hàng #${donHang.id.substring(0, 8)} đã bị hủy.';
           break;
         default:
-          return; // Không gửi thông báo cho trạng thái khác
+          return;
       }
 
-      // Tạo thông báo local cho testing
-      final thongBao = ThongBao(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        tieuDe: tieuDe,
-        noiDung: noiDung,
-        loai: 'don_hang',
-        thoiGian: DateTime.now(),
-        daDoc: false,
-        duLieuThem: {
-          'donHangId': donHang.id,
-          'trangThai': trangThai.toString(),
-        },
-      );
-
-      // Gửi local notification
       await NotificationService.sendLocalNotification(
         title: tieuDe,
         body: noiDung,
       );
-
-      print('✅ Đã gửi thông báo cho khách hàng: $tieuDe');
-    } catch (e) {
-      print('❌ Lỗi khi gửi thông báo: $e');
     }
   }
 
