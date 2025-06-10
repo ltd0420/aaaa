@@ -13,6 +13,7 @@ import 'package:kfc/widgets/danh_gia_widget.dart';
 import 'package:kfc/screens/man_hinh_viet_danh_gia.dart';
 import 'package:kfc/screens/man_hinh_xem_danh_gia.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class ManHinhChiTietSanPham extends StatefulWidget {
   final String? sanPhamId;
@@ -137,13 +138,13 @@ class _ManHinhChiTietSanPhamState extends State<ManHinhChiTietSanPham> {
   String _getImagePath(String hinhAnh) {
     if (hinhAnh.isEmpty) return '';
     if (hinhAnh.startsWith('assets/')) return hinhAnh;
+    if (hinhAnh.startsWith('http')) return hinhAnh; // URL hình ảnh
     return 'assets/images/$hinhAnh';
   }
 
-  Widget _buildImageFromAssets(String imagePath, {double? height, BoxFit? fit}) {
-    final fullPath = _getImagePath(imagePath);
-    
-    if (fullPath.isEmpty) {
+// Hàm để xây dựng hình ảnh từ assets hoặc URL
+  Widget _buildImageFromNetwork(String imageUrl, {double? height, BoxFit? fit}) {
+    if (imageUrl.isEmpty) {
       return Container(
         height: height,
         decoration: BoxDecoration(
@@ -168,9 +169,47 @@ class _ManHinhChiTietSanPhamState extends State<ManHinhChiTietSanPham> {
         ),
       );
     }
-
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
+      height: height,
+      width: double.infinity,
+      fit: fit ?? BoxFit.cover,
+      placeholder: (context, url) => const Center(
+        child: CircularProgressIndicator(color: MauSac.kfcRed),
+      ),
+      errorWidget: (context, url, error) => Container(
+        height: height,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              MauSac.kfcRed.withOpacity(0.8),
+              MauSac.kfcRed.withOpacity(0.6),
+            ],
+          ),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.image_not_supported, size: 60, color: Colors.white),
+              SizedBox(height: 8),
+              Text('Không thể tải hình ảnh', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  // Hàm để xây dựng hình ảnh từ assets hoặc URL
+  Widget _buildImageFromAssets(String imagePath, {double? height, BoxFit? fit}) {
+    if (imagePath.startsWith('http')) {
+      return _buildImageFromNetwork(imagePath, height: height, fit: fit);
+    }
     return Image.asset(
-      fullPath,
+      imagePath,
       height: height,
       width: double.infinity,
       fit: fit ?? BoxFit.cover,

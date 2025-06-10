@@ -5,6 +5,7 @@ import 'package:kfc/theme/mau_sac.dart';
 import 'package:provider/provider.dart';
 import 'package:kfc/providers/gio_hang_provider.dart';
 import 'package:kfc/models/san_pham_gio_hang.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class SanPhamCard extends StatelessWidget {
   final SanPham sanPham;
@@ -22,142 +23,61 @@ class SanPhamCard extends StatelessWidget {
     this.height,
   }) : super(key: key);
 
-  // Helper method để xử lý đường dẫn hình ảnh
-  String _getImagePath(String hinhAnh) {
-    if (hinhAnh.isEmpty) return '';
-    
-    // Nếu đã có đường dẫn đầy đủ
-    if (hinhAnh.startsWith('assets/')) {
-      return hinhAnh;
-    }
-    
-    // Nếu chỉ có tên file, thêm đường dẫn assets
-    return 'assets/images/$hinhAnh';
-  }
-
-  // Widget hiển thị hình ảnh từ assets
+  // Widget hiển thị hình ảnh
   Widget _buildProductImage() {
-    final imagePath = _getImagePath(sanPham.hinhAnh);
-    
-    if (imagePath.isEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          color: Colors.grey[800],
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+    if (sanPham.hinhAnh.isEmpty) {
+      return _buildPlaceholder();
+    }
+
+    if (sanPham.hinhAnh.startsWith('http')) {
+      return CachedNetworkImage(
+        imageUrl: sanPham.hinhAnh,
+        fit: BoxFit.cover,
+        placeholder: (context, url) => const Center(
+          child: CircularProgressIndicator(color: MauSac.kfcRed),
         ),
-        child: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.fastfood,
-                size: 40,
-                color: Colors.white54,
-              ),
-              SizedBox(height: 4),
-              Text(
-                'KFC',
-                style: TextStyle(
-                  color: Colors.white54,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-        ),
+        errorWidget: (context, url, error) {
+          print('Lỗi tải hình ảnh từ Firebase: $error, URL: $url');
+          return _buildPlaceholder();
+        },
       );
     }
 
+    return Image.asset(
+      sanPham.hinhAnh,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) {
+        print('Lỗi tải tài nguyên assets: $error, Path: ${sanPham.hinhAnh}');
+        return _buildPlaceholder();
+      },
+    );
+  }
+
+  // Widget placeholder khi hình ảnh không tải được
+  Widget _buildPlaceholder() {
     return Container(
-      decoration: const BoxDecoration(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      child: ClipRRect(
+      decoration: BoxDecoration(
+        color: MauSac.kfcRed.withOpacity(0.8),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-        child: Stack(
-          fit: StackFit.expand,
+      ),
+      child: const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Hình ảnh chính
-            Image.asset(
-              imagePath,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  color: MauSac.kfcRed.withOpacity(0.8),
-                  child: const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.fastfood,
-                          size: 40,
-                          color: Colors.white,
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          'KFC',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+            Icon(
+              Icons.fastfood,
+              size: 40,
+              color: Colors.white,
             ),
-            
-            // Overlay gradient để text dễ đọc hơn
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                height: 40,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      Colors.black.withOpacity(0.7),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
+            SizedBox(height: 4),
+            Text(
+              'KFC',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            
-            // Badge khuyến mãi
-            if (showDiscount && sanPham.khuyenMai == true && sanPham.giamGia != null && sanPham.giamGia! > 0)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: MauSac.kfcRed,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.3),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Text(
-                    '-${sanPham.giamGia}%',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -235,7 +155,62 @@ class SanPhamCard extends StatelessWidget {
               // Hình ảnh sản phẩm
               Expanded(
                 flex: 3,
-                child: _buildProductImage(),
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _buildProductImage(),
+                      // Overlay gradient
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          height: 40,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.7),
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Badge khuyến mãi
+                      if (showDiscount && sanPham.khuyenMai == true && sanPham.giamGia != null && sanPham.giamGia! > 0)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: MauSac.kfcRed,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.3),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Text(
+                              '-${sanPham.giamGia}%',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
               
               // Thông tin sản phẩm
@@ -348,10 +323,46 @@ class SanPhamCardHorizontal extends StatelessWidget {
     this.onTap,
   }) : super(key: key);
 
-  String _getImagePath(String hinhAnh) {
-    if (hinhAnh.isEmpty) return '';
-    if (hinhAnh.startsWith('assets/')) return hinhAnh;
-    return 'assets/images/$hinhAnh';
+  Widget _buildProductImage() {
+    if (sanPham.hinhAnh.isEmpty) {
+      return _buildPlaceholder();
+    }
+
+    if (sanPham.hinhAnh.startsWith('http')) {
+      return CachedNetworkImage(
+        imageUrl: sanPham.hinhAnh,
+        fit: BoxFit.cover,
+        placeholder: (context, url) => const Center(
+          child: CircularProgressIndicator(color: MauSac.kfcRed),
+        ),
+        errorWidget: (context, url, error) {
+          print('Lỗi tải hình ảnh từ Firebase: $error, URL: $url');
+          return _buildPlaceholder();
+        },
+      );
+    }
+
+    return Image.asset(
+      sanPham.hinhAnh,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) {
+        print('Lỗi tải tài nguyên assets: $error, Path: ${sanPham.hinhAnh}');
+        return _buildPlaceholder();
+      },
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      color: MauSac.kfcRed.withOpacity(0.8),
+      child: const Center(
+        child: Icon(
+          Icons.fastfood,
+          color: Colors.white,
+          size: 30,
+        ),
+      ),
+    );
   }
 
   @override
@@ -385,33 +396,7 @@ class SanPhamCardHorizontal extends StatelessWidget {
                   child: Container(
                     width: 80,
                     height: 80,
-                    child: _getImagePath(sanPham.hinhAnh).isNotEmpty
-                        ? Image.asset(
-                            _getImagePath(sanPham.hinhAnh),
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                color: MauSac.kfcRed.withOpacity(0.8),
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.fastfood,
-                                    color: Colors.white,
-                                    size: 30,
-                                  ),
-                                ),
-                              );
-                            },
-                          )
-                        : Container(
-                            color: MauSac.kfcRed.withOpacity(0.8),
-                            child: const Center(
-                              child: Icon(
-                                Icons.fastfood,
-                                color: Colors.white,
-                                size: 30,
-                              ),
-                            ),
-                          ),
+                    child: _buildProductImage(),
                   ),
                 ),
                 
@@ -529,10 +514,46 @@ class SanPhamCardSmall extends StatelessWidget {
     this.onTap,
   }) : super(key: key);
 
-  String _getImagePath(String hinhAnh) {
-    if (hinhAnh.isEmpty) return '';
-    if (hinhAnh.startsWith('assets/')) return hinhAnh;
-    return 'assets/images/$hinhAnh';
+  Widget _buildProductImage() {
+    if (sanPham.hinhAnh.isEmpty) {
+      return _buildPlaceholder();
+    }
+
+    if (sanPham.hinhAnh.startsWith('http')) {
+      return CachedNetworkImage(
+        imageUrl: sanPham.hinhAnh,
+        fit: BoxFit.cover,
+        placeholder: (context, url) => const Center(
+          child: CircularProgressIndicator(color: MauSac.kfcRed),
+        ),
+        errorWidget: (context, url, error) {
+          print('Lỗi tải hình ảnh từ Firebase: $error, URL: $url');
+          return _buildPlaceholder();
+        },
+      );
+    }
+
+    return Image.asset(
+      sanPham.hinhAnh,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) {
+        print('Lỗi tải tài nguyên assets: $error, Path: ${sanPham.hinhAnh}');
+        return _buildPlaceholder();
+      },
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      color: MauSac.kfcRed.withOpacity(0.8),
+      child: const Center(
+        child: Icon(
+          Icons.fastfood,
+          color: Colors.white,
+          size: 30,
+        ),
+      ),
+    );
   }
 
   @override
@@ -567,33 +588,7 @@ class SanPhamCardSmall extends StatelessWidget {
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
                   child: Container(
                     width: double.infinity,
-                    child: _getImagePath(sanPham.hinhAnh).isNotEmpty
-                        ? Image.asset(
-                            _getImagePath(sanPham.hinhAnh),
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                color: MauSac.kfcRed.withOpacity(0.8),
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.fastfood,
-                                    color: Colors.white,
-                                    size: 30,
-                                  ),
-                                ),
-                              );
-                            },
-                          )
-                        : Container(
-                            color: MauSac.kfcRed.withOpacity(0.8),
-                            child: const Center(
-                              child: Icon(
-                                Icons.fastfood,
-                                color: Colors.white,
-                                size: 30,
-                              ),
-                            ),
-                          ),
+                    child: _buildProductImage(),
                   ),
                 ),
               ),
